@@ -1,0 +1,652 @@
+---
+title: "Final Project-SNA"
+author: "Anton Rosén"
+date: '2021-04-03'
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning=FALSE)
+
+library(RSiena)
+library(network)
+library(sna)
+library(knitr)
+library(ggplot2)
+
+# Importing friendship and attribute data.
+
+klas12b.friendship.wave1 <- as.matrix(read.table("klas12b-net-1.dat"))
+klas12b.friendship.wave2 <- as.matrix(read.table("klas12b-net-2.dat"))
+klas12b.friendship.wave3 <- as.matrix(read.table("klas12b-net-3.dat"))
+klas12b.friendship.wave4 <- as.matrix(read.table("klas12b-net-4.dat"))
+
+klas12b.delinquency <- as.matrix(read.table("klas12b-delinquency.dat"))
+klas12b.demographics <- as.matrix(read.table("klas12b-demographics.dat"))
+
+colnames(klas12b.delinquency) <- c("Wave1","Wave2","Wave3","Wave4")
+colnames(klas12b.demographics) <- c("SexBinary","Age","EthnicityBinary","Relig.OfDad")
+```
+
+```{r, echo=FALSE}
+
+# Recoding incidentally missing nominator (9s) and structurally missing nominator or nominee (10s) to NAs in friendship adjacency matrices. 
+
+
+klas12b.friendship.wave1[klas12b.friendship.wave1==9] <- NA
+klas12b.friendship.wave2[klas12b.friendship.wave2==9] <- NA
+klas12b.friendship.wave3[klas12b.friendship.wave3==9] <- NA
+klas12b.friendship.wave4[klas12b.friendship.wave4==9] <- NA
+
+klas12b.friendship.wave1[klas12b.friendship.wave1==10] <- NA
+klas12b.friendship.wave2[klas12b.friendship.wave2==10] <- NA
+klas12b.friendship.wave3[klas12b.friendship.wave3==10] <- NA
+klas12b.friendship.wave4[klas12b.friendship.wave4==10] <- NA
+
+# Removing structurally missings.
+
+klas12b.friendship.wave1 <- klas12b.friendship.wave1[-2,][,-2]
+klas12b.friendship.wave2 <- klas12b.friendship.wave2[-2,][,-2]
+klas12b.friendship.wave3 <- klas12b.friendship.wave3[-2,][,-2]
+klas12b.friendship.wave4 <- klas12b.friendship.wave4[-2,][,-2]
+klas12b.friendship.wave1 <- klas12b.friendship.wave1[-15,][,-15]
+klas12b.friendship.wave2 <- klas12b.friendship.wave2[-15,][,-15]
+klas12b.friendship.wave3 <- klas12b.friendship.wave3[-15,][,-15]
+klas12b.friendship.wave4 <- klas12b.friendship.wave4[-15,][,-15]
+klas12b.friendship.wave1 <- klas12b.friendship.wave1[-17,][,-17]
+klas12b.friendship.wave2 <- klas12b.friendship.wave2[-17,][,-17]
+klas12b.friendship.wave3 <- klas12b.friendship.wave3[-17,][,-17]
+klas12b.friendship.wave4 <- klas12b.friendship.wave4[-17,][,-17]
+klas12b.friendship.wave1 <- klas12b.friendship.wave1[-18,][,-18]
+klas12b.friendship.wave2 <- klas12b.friendship.wave2[-18,][,-18]
+klas12b.friendship.wave3 <- klas12b.friendship.wave3[-18,][,-18]
+klas12b.friendship.wave4 <- klas12b.friendship.wave4[-18,][,-18] 
+```
+
+```{r, echo=FALSE}
+# Removing same missings from delinquency and demographics data.
+
+klas12b.demographics <- klas12b.demographics[-2,]
+klas12b.demographics <- klas12b.demographics[-15,]
+klas12b.demographics <- klas12b.demographics[-17,]
+klas12b.demographics <- klas12b.demographics[-18,]
+
+klas12b.delinquency <- klas12b.delinquency[-2,]
+klas12b.delinquency <- klas12b.delinquency[-15,]
+klas12b.delinquency <- klas12b.delinquency[-17,]
+klas12b.delinquency <- klas12b.delinquency[-18,]
+```
+
+```{r,echo=FALSE}
+# I convert religion of father into a binary. For the rest of this assignment, a student either have a religious father (Christian or other) or not. 2 = non-religious father, 1=religious father.
+klas12b.demographics[,4] <- ifelse(klas12b.demographics[,4]==2,2,1)
+```
+
+```{r, echo=FALSE}
+# Checking Hamming distance
+
+w12 <- table(klas12b.friendship.wave1, klas12b.friendship.wave2,useNA ="always")
+w23 <- table(klas12b.friendship.wave2, klas12b.friendship.wave3, useNA="always")
+w34 <- table(klas12b.friendship.wave3, klas12b.friendship.wave4, useNA="always")
+w14 <- table(klas12b.friendship.wave1, klas12b.friendship.wave4, useNA="always")
+
+Hamming <- function(changetable) {
+    return(changetable[2,1] + changetable[1,2])
+}
+
+hw12 <- Hamming(w12)
+hw23 <- Hamming(w23)
+hw34 <- Hamming(w34)
+hw14 <- Hamming(w14)
+
+
+# We have an overall change in Hamming distance of 89 which is good.
+```
+
+```{r, echo=FALSE}
+# Checking Jaccard coefficient. 
+Jaccard <- function(changetable) {
+    return(changetable[2,2]/(changetable[1,2] + changetable[2,1] + changetable[2,2]))
+}
+
+jw12 <- Jaccard(w12)
+jw23 <- Jaccard(w23)
+jw34 <- Jaccard(w34)
+jw14 <- Jaccard(w14)
+
+# We have an overall change in Jaccard coefficient with ~0.320 which is good. 
+```
+
+# Research question, Theoretical background and Hypotheses
+
+For this assignment I will be working with a longitudinal data set depicting the friendship network of a Dutch school class. The full data set was collected by Andrea Knecht between 2003 and 2004 (2008) but the part I am using for this assignment were sub-grouped by Snijders, Steglich and van de Bunt (2010). The data consists of 26 students assessed in four waves. It includes 17 girls and 9 boys of ages 11-13. After removing structurally absent actors, 22 students remained. This is the number of actors that I will be working with for this assignment. This meets formal data requirements concerning number of actors. (Snijders, Steligh & van de Bunt 2010, p. 49)  
+
+Apart from sex and age, demographic data also include the students ethnicity and religion of the students dad. Ethnicity was collected in a majority-minority binary format were 1s indicate Dutch and 2s indicate non-Dutch. The variable for religion of students dad was collected in a three leveled format were 1s indicate Christian, 2s indicate non-religious and 3s indicate other religion. I convert this variable to a binary religious variable, concatenating students with Christian fathers and students with fathers of other religion. The data was self-reported and each participant was asked to report up to twelve other classmates that they considered to be good friends. 
+
+Apart from this, behavioral data concerning acts of minor delinquency were collected. Acts of minor delinquency includes acts like stealing, vandalism, graffiti and fighting. Delinquency was measured over a five-point scale that ranges from "never" to "more than 10 times" and was collected over waves 1,2,3 and 4. 
+
+In sum, the longitudinal format of the data as well as the inclusion of composition variables enables us to build stochastic actor-oriented models (SOAMs) that investigate network evolution. SOAMs analyze the co-evolution of network structure and composition variables. In these models, its assumed that the composition variables influence selection processes and that the network structures influence the composition variables.
+Its assumed that the actors, one at a time, make tie swaps or preserve ties in continuous probability space. These choices happen in continuous time between the discrete data collection moments.(Robins, 2015 p.195-196) These decisions are assumed to be guided by _myopic rationality_, that is; actors make decisions on tie swaps based on the near-future consequence within the network of that swap. In the model this is captured by the objective function which expresses the likelihood for the actor to make this or that change in the network. (Labun, Wittek & Steglich, 2016 p.372)
+
+Throughout the course we have spoken a lot about mechanisms of homophily. More specifically, that under conditions of similarity there is a greater possibility of tie formation and reciprocation within networks. The discussions in the class have focused a lot on for instance gender and ethnicity. For instance, Leszczensky and Pink (2015) report findings that demonstrate tendencies for ethnic homophily among school friendship networks. We also know that gender homophily is highly prevalent in schools. However, homophily mechanisms centered around the concept of religion is not something we have discussed much in this course. Given that the data include a variable that crudely indicated religious denomination of the students father I think this would be an interesting focal point of study. 
+
+In many ways and for many of us religion does not play a huge explicit role in our lives. This assignment is written over the Easter holidays were, I believe at least from a Swedish context, it is proportionally more people that consider Easter as an egg-painting, family get-together holiday than a traditional commemorating the crucifixion of Jesus-type of holiday. Imbued in these different lifestyles, certain values probably gain more traction within the individual than others. So a person living a less-religious lifestyle considers value X to be of particular importance whilst a more-religious individual might consider value Y. So, given that religiousness shape our lifestyles, our choices and the values by which we live our lives, I think it becomes easier to grasp the fact that even though religion necessarily does not play an explicit role in the lives of most of us, it probably plays an implicit part in the way we structure and relate to others in our surrounding and the formation of social groups. But is this notion strong enough to invoke a statistically significant difference in friendship formation in the data set at hand? 
+
+Using the variable for fathers religion we could look at how having a religious father, and arguably religious upbringing per se, influence friendship formations. I would formulate my hypothesis as follows:
+
+__Null Hypothesis 1__: Having a religious father does not increase one's proclivity to over time befriend others who also have religious fathers proportionally more than to befriend others who do not have religious fathers.
+
+__Alt Hypothesis 1__: Having a religious father does increase one's proclivity to over time befriend others who also have religious fathers proportionally more than to befriend individuals who do not have a religious father. 
+
+There are some epistemic pitfall worth addressing here. Using the religion of the father as a proxy for the religion of the student is a flawed approach. We are not de facto looking at the attribute of the student. A student could very well have a Christian father but consider him or herself a non-Christian. However, research has found that fathers are important actors that influence religious transmission to their children. (Baker-Sperry, 2001) Albeit, we lack the data to make statements of individual level religiousness as a potential homophily mechanism but must interpret findings in relation to a background-actor i.e the father and potentially the household. Another pitfall is, I believe, that this approach cannot account for within variable level variation. So for instance Christian fathers could vary a lot from each other. I think this is also important to remember when making interpretations because the role this has on the tie formations over time will be left unexplained. Thirdly and lastly, individuals have a unique combination of individual attributes who´s intersection construes the particular identity and social position of that person. In essence, social space is multidimensional and we should thus expect multidimensional homophily. In this case, I think it makes interpretations by default faulty since I am, for the scope of this assignment, reducing the complex nature of social relations down to a single homophily dimension. (Block & Grund, 2014)
+
+My second hypothesis will deal with tendencies for hierarchy within the network. The social nature of humans make friendships a central characteristic and a building block of our lives. We often assume that friendship goes both ways, that nominations of friendships are mutual and bidirectional. This is also a widely observed phenomenon. (Gallagher & Robins, 2015 p.936) According to Simmel (1950), reciprocity has a tendency to extend to higher-order friendship structures such as triads and enforce closures, i.e produce relatively dense clusters, throughout the network. So given that I am working with a friendship network, I would expect this tendency to manifest. But does hierarchical ordering manifest itself in the network? According to Snijders, Steglich & van de Bunt there is usually a tendency for hierarchical ordering within social network data sets but is that the case here as well? (2010, p.48)
+
+Building on this my second hypothesis is:
+
+__Null Hypothesis 2__: There is a tendency for reciprocation, transitive closure and hierarchical ordering in the network.
+
+__Alt Hypothesis 2__: There is a tendency for reciprocation and transitive closure but not hierarchical ordering in the network. 
+
+Lastly, I want to investigate how the network structure influences actors composition variables. More specifically, how peer effects manifest delinquency among the network actors in a co-evolution framework. 
+
+Youth delinquency has been studied extensively. A classic study, by Chambliss (1973), investigated how youth gangs from different socioeconomic strata were treated differently by the society. Chambliss offers an interactionist interpretation in his study. According to him, the gangs were treated differently because their different class background distorted the perception of their acts, leading to unequal treatment of the gangs. Punishment was more severe for youths from lower income groups than upper-class gangs.
+
+Following Chambliss interpretative framework, I believe there should be a greater risk of cascading delinquency in a network framed inside of a more well-off environment because delinquency can take root and spread through peer pressure to a greater extent without sufficient interventions from the surrounding. So for example, if the data we are dealing with here was collected in a "rich" school and youths are operating under peer pressure, delinquency could be very contagious because there is both this incentivizing factor in the form of peer pressure and a lack of disincentivizing factors. 
+
+There are some caveats. Firstly, I do not know the socioeconomic background of the actors within the network. Secondly, in order to fully bring this theory to life I believe there is a need for a control network to compare estimates against. However, I still think it could be interesting to bear Chambliss in mind when discussing the results because I think his notions informs us of which environment it is more or less likely that we should see certain results. 
+
+Another big caveat is in regards to the entangled nature of social influence (peer pressure) processes and self-selected behaviors which is problematic if we want to interpret causality. On the one side the causal explanation is based on network effects, on the other its based on composition variable effects.
+
+A notable example of this Christakis and Fowlers study from 2007 on obesity diffusion in friendship networks. A potential problem with peer effect studies is that there can be some latent attribute variable missing in the analysis which actually explains an observed effect not as a product of the network but as a homophily tendency (Shalizi & Thomas, 2011). However, as Robins writes, these problems should not dissuade us from trying to scientifically infer socially diffused behaviors; "Pandora´s network diffusion box has been opened and cannot be shut" (2015, p.219), and further goes on to state that if any method has the potential to properly disentangle the causal conundrum it's SOAMs, given that we have longitudinal data that include relevant variables (2015, p.220).
+
+__Null Hypothesis 3__: There is no peer pressure network effects for delinquency related behavioral norms. 
+
+__Alt Hypothesis 3__: There is peer pressure network effects for delinquency related behavioral norms.
+
+\newpage
+
+# Data description
+
+## Visualization
+
+* Blue color - Students with non-religious fathers
+* Red color - Students with religious (Christian or other) fathers
+* Circle shape - non-Dutch students
+* Square shape - Dutch students
+* Large shape - Females
+* Small shape - Males
+
+```{r, echo=FALSE}
+# Setting up objects for visualization. Creating graph adjecencys for each wave and layouts.
+graph1 <- igraph::graph.adjacency(klas12b.friendship.wave1)
+graph2 <- igraph::graph.adjacency(klas12b.friendship.wave2)
+graph3 <- igraph::graph.adjacency(klas12b.friendship.wave3)
+graph4 <- igraph::graph.adjacency(klas12b.friendship.wave4)
+
+myLayout1 <- igraph::layout.kamada.kawai(graph1)
+myLayout2 <- igraph::layout.kamada.kawai(graph2)
+myLayout3 <- igraph::layout.kamada.kawai(graph3)
+myLayout4 <- igraph::layout.kamada.kawai(graph4)
+```
+
+
+```{r, echo=FALSE, fig.width=10, fig.height=10}
+# Visualizing network structure, blue coloring represent students with non-religious fathers. Red coloring indicate students with religious (Christian or other religion) fathers.
+# Circles represents ethnically non-Dutch students and squares represent ethnic Dutch students. 
+# Size of the vertices indicate gender, larger vertices = females.
+plot(graph1,
+     vertex.color = ifelse(klas12b.demographics[,4]==2, "blue", "red"),
+     vertex.shape = ifelse(klas12b.demographics[,3]==2, "circle", "square"),
+     vertex.size = ifelse(klas12b.demographics[,1]==1,15,10),
+     edge.color = "black",
+     edge.width = 1,
+     edge.arrow.size = 0.2,
+     layout = myLayout1,
+     main = "Friendship network and Religion of father - wave 1")
+
+ 
+```
+
+\newpage 
+
+```{r,echo=FALSE, fig.width=10, fig.height=10}
+#  Plotting 2nd, 3rd and 4th waves
+plot(graph2,
+     vertex.color = ifelse(klas12b.demographics[,4]==2, "blue", "red"),
+     vertex.shape = ifelse(klas12b.demographics[,3]==2, "circle", "square"),
+     vertex.size = ifelse(klas12b.demographics[,1]==1,15,10),
+     edge.color = "black",
+     edge.width = 1,
+     edge.arrow.size = 0.2,
+     layout = myLayout1,
+     main = "Friendship network and Religion of father - wave 2")
+
+plot(graph3,
+     vertex.color = ifelse(klas12b.demographics[,4]==2, "blue", "red"),
+     vertex.shape = ifelse(klas12b.demographics[,3]==2, "circle", "square"),
+     vertex.size = ifelse(klas12b.demographics[,1]==1,15,10),
+     edge.color = "black",
+     edge.width = 1,
+     edge.arrow.size = 0.2,
+     layout = myLayout1,
+     main = "Friendship network and Religion of father - wave 3")
+
+plot(graph4,
+     vertex.color = ifelse(klas12b.demographics[,4]==2, "blue", "red"),
+     vertex.shape = ifelse(klas12b.demographics[,3]==2, "circle", "square"),
+     vertex.size = ifelse(klas12b.demographics[,1]==1,15,10),
+     edge.color = "black",
+     edge.width = 1,
+     edge.arrow.size = 0.2,
+     layout = myLayout1,
+     main = "Friendship network and Religion of father - wave 4")
+```
+
+```{r, echo=FALSE}
+# Gender ratio
+sex.ratio <- mean(klas12b.demographics[,1]==1)
+```
+
+```{r, echo=FALSE}
+# Mean non-religious fathers
+mean.religfat <- mean(klas12b.demographics[,4]==2)
+sd.religfat <- sd(klas12b.demographics[,4]==2)
+```
+
+```{r, echo=FALSE}
+# Mean delinquency per wave + standard deviations
+mean.delinq.w1 <- mean(klas12b.delinquency[,1])
+mean.delinq.w2 <- mean(klas12b.delinquency[,2])
+mean.delinq.w3 <- mean(klas12b.delinquency[,3])
+mean.delinq.w4 <- mean(klas12b.delinquency[,4])
+
+sd.delinq.w1 <- sd(klas12b.delinquency[,1])
+sd.delinq.w2 <- sd(klas12b.delinquency[,2])
+sd.delinq.w3 <- sd(klas12b.delinquency[,3])
+sd.delinq.w4 <- sd(klas12b.delinquency[,4])
+```
+
+```{r, echo=FALSE}
+# More descriptive statistics. I check density, reciprocity, transitivity and out- and in-degree (I  only keep one in table).
+dens.wave1 <- gden(klas12b.friendship.wave1)
+dens.wave2 <- gden(klas12b.friendship.wave2)
+dens.wave3 <- gden(klas12b.friendship.wave3)
+dens.wave4 <- gden(klas12b.friendship.wave4)
+
+reci.wave1 <- grecip(klas12b.friendship.wave1, measure="edgewise")
+reci.wave2 <- grecip(klas12b.friendship.wave2, measure="edgewise")
+reci.wave3 <- grecip(klas12b.friendship.wave3, measure="edgewise")
+reci.wave4 <- grecip(klas12b.friendship.wave4, measure="edgewise")
+
+trans.wave1 <- gtrans(klas12b.friendship.wave1, measure="weak")
+trans.wave2 <- gtrans(klas12b.friendship.wave2, measure="weak")
+trans.wave3 <- gtrans(klas12b.friendship.wave3, measure="weak")
+trans.wave4 <- gtrans(klas12b.friendship.wave4, measure="weak")
+
+outdeg.wave1 <- degree(klas12b.friendship.wave1, cmode="outdegree")
+mean.outdeg.w1 <- mean(outdeg.wave1)
+sd.outdeg.w1 <-sd(outdeg.wave1)
+outdeg.wave2 <- degree(klas12b.friendship.wave2, cmode="outdegree")
+mean.outdeg.w2 <- mean(outdeg.wave2)
+sd.outdeg.w2 <-sd(outdeg.wave2)
+outdeg.wave3 <- degree(klas12b.friendship.wave3, cmode="outdegree")
+mean.outdeg.w3 <- mean(outdeg.wave3)
+sd.outdeg.w3 <-sd(outdeg.wave3)
+outdeg.wave4 <- degree(klas12b.friendship.wave4, cmode="outdegree")
+mean.outdeg.w4 <- mean(outdeg.wave4)
+sd.outdeg.w4 <-sd(outdeg.wave4)
+
+indeg.wave1 <- degree(klas12b.friendship.wave1, cmode="indegree")
+mean.indeg.w1 <- mean(indeg.wave1)
+sd.indeg.w1 <-sd(indeg.wave1)
+indeg.wave2 <- degree(klas12b.friendship.wave2, cmode="indegree")
+mean.indeg.w2 <- mean(indeg.wave2)
+sd.indeg.w2 <-sd(indeg.wave2)
+indeg.wave3 <- degree(klas12b.friendship.wave3, cmode="indegree")
+mean.indeg.w3 <- mean(indeg.wave3)
+sd.indeg.w3 <-sd(indeg.wave3)
+indeg.wave4 <- degree(klas12b.friendship.wave4, cmode="indegree")
+mean.indeg.w4 <- mean(indeg.wave4)
+sd.indeg.w4 <-sd(indeg.wave4)
+```
+
+```{r, echo=FALSE} 
+# Binding together estimates. 
+
+d <- rbind(c(dens.wave1,dens.wave2,dens.wave3,dens.wave4))
+
+r <- rbind(c(reci.wave1,reci.wave2,reci.wave3,reci.wave4))
+
+t <- rbind(c(trans.wave1,trans.wave2,trans.wave3,trans.wave4))
+
+m.deg <- rbind(c(mean.outdeg.w1,mean.outdeg.w2,mean.outdeg.w3,mean.outdeg.w4))
+
+sd.out <- rbind(c(sd.outdeg.w1,sd.outdeg.w2,sd.outdeg.w3,sd.outdeg.w4))
+
+sd.in <- rbind(c(sd.indeg.w1,sd.indeg.w2,sd.indeg.w3,sd.indeg.w4))
+
+m.delinq <- rbind(c(mean.delinq.w1,mean.delinq.w2,mean.delinq.w3,mean.delinq.w4))
+
+sd.delinq <- rbind(c(sd.delinq.w1,sd.delinq.w2,sd.delinq.w3,sd.delinq.w4))
+
+```
+
+\newpage
+
+```{r, echo=FALSE}
+# Creating table of descriptive statistics.
+
+table1 <- rbind(d,r,t,m.deg,sd.out,sd.in, sex.ratio, mean.religfat, m.delinq, sd.delinq)
+row.names(table1) <- c("Density", "Reciprocity", "Transitivity", "Mean degree", "SD out-degree", "SD in-degree", "Proportion females", "Mean non-religious fathers", "Mean delinquency", "SD delinquency") 
+colnames(table1) <- c("Wave 1", "Wave 2", "Wave 3", "Wave 4")
+
+kable((table1), digits=3, caption = "Descriptive statistics")
+```
+
+```{r, echo=FALSE}
+# Creating table of previously calculated Hamming distance and Jaccard coefficient. 
+
+ham <- rbind(c(hw12,hw23,hw34,hw14))
+jac <- rbind(c(jw12,jw23,jw34,jw14))
+
+table2 <- rbind(ham,jac)
+row.names(table2) <- c("Hamming Distance", "Jaccard Index")
+colnames(table2) <- c("Wave 1-2", "Wave 2-3", "Wave 3-4", "Wave 1-4")
+
+kable((table2), digits=3, caption = "Descriptive statistics - Indicators of change")
+```
+Jaccard indices per period are all above 0.4 and the overall coefficient is 0.3. This gives an indication of the stability of ties per period that is sufficient according to the RSiena manual which recommend Jaccard indices above 0.3.(Ripley et al., 2021, p.20). 
+
+Estimates of Hamming distance return the smallest amount of tie swaps that is needed to connect two observations in our data. More specifically it returns the number of broken ties and newly created ties between two observations. This informs us of the analysis statistical power (Labun, Wittek & Steglich, 2016, p.376). The period estimates ranges from 67 tie swaps to 81. The overall tie swap rate, from period one to four, is 89. 
+
+The density index return the number of ties in the network proportionally to the number of possible ties. This value ranges from 1 to 0 depending on how connected the network is. In our case the density rises over time which informs us that over time we have new ties forming between previously unconnected actors. The density recede marginally in the fourth period. (Robins, 2015, p.23)
+
+The reciprocity index returns the proportion of ties that are reciprocated. We can see that this proportion increases from the first to the second period. It then recedes from the second to the third and then marginally increases again from third to fourth. Overall, reciprocation tends to diminish within the network which is a bit surprising given that the network I am working with is a friendship network. 
+
+The transitivity index returns the proportion of closed two-paths. This estimate peaks at the third time point and reaches its bottom at the fourth time point. In general these estimates are close to but lower than the estimates for reciprocation, except for the third period, which I believe hints towards the idea that reciprocation "feeds" transitivity. 
+
+Out-degrees can be conceptualized as a persons activity or expansiveness and refers to the number of ties directed away from an actor. In-degree on the other hand can the thought of as the popularity of an individual and refers to the number of ties directed to an actor (ibid). Based on the indices above, we see that an actor on average sends more ties than they receive. The average amount of ties an actor has (both in and out going) increases over the first three time points but diminish marginally from the third to the fourth time point. 
+
+Considering gender proportions, these estimates remain the same over all four time points with more females than men being present in the data. This is a circumstance of our data cleaning where structurally absents has been removed. The only actors present in the data are those that were present all the way throughout the investigation period. Actors that for instance moved away from the school and the class at some time point or joined the class after the study began has been omitted. This also explains why proportion of students with religious fathers remains the same throughout the investigation period. 
+
+```{r, echo=FALSE}
+# Visualizing delinquency distribution. 
+
+klas12b.delinquency.visual <- as.data.frame(klas12b.delinquency)
+
+klas12b.delinquency.visual <- stack(klas12b.delinquency.visual)
+
+ggplot(klas12b.delinquency.visual, aes(x=ind, y=values, fill=ind))+
+  geom_violin()+
+  labs(title="Delinquency distribution", x="Period", y="Values") 
+```
+
+In regards to delinquency, which is the dependent behavioral variable in hypothesis 3, it increases over the first three time points and recede marginally from the third to the fourth. Looking at the first and fourth time points we see that the standard deviations are proportionally larger than during the second and third time points. Potentially this is due to a stronger variability in delinquency scores during the former time points. Looking at the visualized delinquency scores I believe this is confirmed. So in the first and fourth wave we have more outliers. 
+
+ \newpage
+ 
+# Operationalization of hypotheses 
+
+```{r, echo=FALSE}
+# Identifying number of actors.
+actors <- dim(klas12b.demographics)[1]
+```
+
+```{r, echo=FALSE}
+# Dependent variable for hypothesis 1 and 2.
+friends.net <- sienaDependent(array(c(klas12b.friendship.wave1, klas12b.friendship.wave2, klas12b.friendship.wave3, klas12b.friendship.wave4),dim=c(actors, actors, 4)))
+```
+
+```{r, echo=FALSE}
+#  Dependent actor attribute for hypothesis 3.
+delinq.dep <- sienaNet(klas12b.delinquency, type="behavior")
+```
+
+```{r, echo=FALSE}
+# Creating covariates for analysis. 
+
+sex.covar <- coCovar(klas12b.demographics[,1])
+age.covar <- coCovar(klas12b.demographics[,2])
+ethnic.covar <- coCovar(klas12b.demographics[,3])
+relig.covar <- coCovar(klas12b.demographics[,4])
+```
+
+```{r, echo=FALSE}
+# Creating data to work with.
+network.data <- sienaDataCreate(friends.net,delinq.dep,sex.covar,age.covar,ethnic.covar,relig.covar)
+```
+
+```{r, echo=FALSE, include=FALSE}
+# Specifying effects. 
+
+effects <- getEffects(network.data)
+effects <- includeEffects(effects,sameX,interaction1="relig.covar", name="friends.net") # Religious father homophily effect, Alt H1
+effects <- includeEffects(effects,recip,gwespFF,cycle3) # Reciprocation, transitivity and hierarchical clustering (Gwesp+Cycle3), Alt H2
+effects <- includeEffects(effects,sameX,interaction1="delinq.dep", name="friends.net") # Delinquency homophily, its included as control since social influence and homophily is entangled processes. 
+effects <- includeEffects(effects,name="delinq.dep",avSim,interaction1="friends.net") # Peer pressure effect with delinquency as DV and network as IV, Alt H3
+```
+
+The hypotheses are operationalized by assigning effect statistics to the objective functions for friendship and delinquency. 
+
+_Hypothesis 1_ is about homophily and states that actors who have fathers that are religious will connect more to others who also have religious fathers. Under conditions of similarity on this attribute, connectivity will increase. Here, the friendship network acts as the dependent variable so effect statistics are fit to its objective function. These effects are ``simX`` and ``interaction1=delinq``. More specifically, the similarity estimate looks at probabilities for different configurations of dyadic similarity. When this is coupled with the ``interaction1=delinq``, we should yield estimates that reveal whether actors select friends based on similarity of fathers religion. 
+
+_Hypothesis 2_ deals with hierarchical ordering. More specifically it adds structural triadic effects and reciprocation as control variables to see if our friendship network behaves as we would expect it to. I utilize geometrically weighted parameters to estimate triadic closure. This means that the number of indirect connection has a non-linear effect on the log-probability for the creation of a direct tie, as opposed to if I were to use transitive triplets or transitive tie effects. It is suggested that we should choose either the non-linear estimations or the linear estimations but not both simultaneously.(Ripley et al.,2021 p.44) I utilize the non-linear effect since these yield better fits. I also add ``cycle3`` which, when coupled with estimates of transitive closure, allows me to see if there is hierarchical tendencies or tendencies towards generalized exchange in the network depending on if the estimate is negative or positive. (Snijders, Steglich & van de Bunt, 2010 p.48)
+
+_Hypothesis 3_ looks at the "contagiousness" of delinquency. More specifically, if the network contribute some peer effect that make delinquency increase. In this case delinquency figures as the dependent variable. I add ``avSim`` which utilize the average similarity between actor _i_ and the actors which are connected to _i_ a long with its interaction to the friendship network structure, ``interaction1=friends.net``. I also add effects that check delinquency homophily due to problems separating social influence processes from selection processes.
+
+
+
+```{r, echo=FALSE, include=FALSE}
+# The model converges, maximum convergence ratio do not exceed 0.2.
+
+friends.alg1  <- sienaAlgorithmCreate(projname = "school_friends", n3 = 1000, seed = 1234)
+(output1 <- siena07(friends.alg1, data=network.data, effects=effects, batch = F, verbose = F, returnDeps=T ))
+```
+
+```{r, echo=FALSE, include=FALSE}
+parameter <- output1$effects$effectName
+estimate <- output1$theta
+st.error <- sqrt(diag(output1$covtheta))
+normal.variate <- estimate/st.error
+p.value.2sided <- 2*pnorm(abs(normal.variate),lower.tail = FALSE)
+results.table <- data.frame(parameter,
+                      estimate = round(estimate,3),
+                      st.error = round(st.error,3),
+                      normal.variate = round(normal.variate,2),
+                      p.value = round(p.value.2sided,4))
+
+kable(results.table) 
+
+#Creating a table for the SOAM results from the first output. However, as we will see, the fits are not ideal so this table is not included in the final report.
+```
+
+```{r,echo=FALSE, include=FALSE, warning=FALSE}
+# Goodness of fits for in-degree distribution, out-degree distribution, triad census and behavior distribution.
+
+fit.indeg <- sienaGOF(output1,IndegreeDistribution,varName = "friends.net",cumulative = FALSE)
+fit.outdeg <- sienaGOF(output1,OutdegreeDistribution,varName = "friends.net",cumulative = FALSE)
+fit.triads <- sienaGOF(output1,TriadCensus,varName = "friends.net")
+fit.behaviour <- sienaGOF(output1,BehaviorDistribution, verbose=TRUE,join=TRUE,varName="delinq.dep")
+```
+
+```{r,echo=FALSE}
+# Plotting the fits. Although the fits for triads are above 0.05 (threshold) I think these can be improved. Also in-degree has to be fixed, it´s lower than 0.05.
+
+plot(fit.indeg)
+plot(fit.outdeg)
+plot(fit.triads,center = TRUE,scale = TRUE)
+plot(fit.behaviour)
+```
+
+```{r, echo=FALSE}
+# Making use of Robert Krauses auxiliary fit function from lab on 17.03.21 to calculate geodesic distances fit. 
+
+geo.dist <- function(i, data, sims, period, groupName,
+    varName, levls = c(1:5,Inf), cumulative= TRUE, ...) {
+    x <- networkExtraction(i, data, sims, period, groupName, varName)
+    require(sna)
+    a <- sna::geodist(symmetrize(x))$gdist
+    if (cumulative)
+    {
+        gdi <- sapply(levls, function(i){ sum(a <= i) })
+    }
+    else
+    {
+        gdi <- sapply(levls, function(i){ sum(a == i) })
+    }
+    names(gdi) <- as.character(levls)
+    return(gdi)
+}
+```
+
+```{r, echo=FALSE, include=FALSE}
+# Conducting goodness of fit test for geodesic distribution.
+fits.geodist <- sienaGOF(output1,geo.dist,
+                           varName = "friends.net",cumulative = FALSE)
+```
+
+```{r, echo=FALSE}
+# Ploting geodesic distribution fit. Looks good.
+plot(fits.geodist) 
+```
+The fits are not ideal if we look at the distribution for triads. I adjust the effect statistics and do new estimations. I add the``gwespBB`` effect which accounts for another configuration of triadic closure. I also add ``inPopSqrt``, ``outPopSqrt``,``outAct`` and ``reciAct`` in a second adjustment to the effect statistics in order to improve degree distribution fits. 
+
+The geometrically weighted edgewise shared partners (gwesp) terms helps to improve improve the fits for TriadCensus. As we will see bellow, the p-value for these fits increases well above 0.05 now. The squared in- and out popularity and out-degree activity effects are added because according to Ripley et al,. (2021 p.44), these effects are so basic that they cannot be left out. 
+
+\newpage
+
+```{r, echo=FALSE, include=FALSE}
+# Adjusting model. I add gwespBB to improve fits for triads. I include squared in- and out degree effects, out-degree activity and reciprocal degree-related activity. This will help imporve fits for in- and out-degree.
+
+effects2 <- includeEffects(effects,name = "friends.net",gwespBB)
+effects2 <- includeEffects(effects2,name = "friends.net",inPopSqrt,outPopSqrt,outAct,reciAct)
+```
+
+```{r, echo=FALSE,include=FALSE}
+# Maximum convergence ratio is sufficient (~.25). All convergence t-ratios looks good.
+
+(output2 <- siena07(friends.alg1,
+                          data = network.data,
+                          effects = effects2,
+                          batch = FALSE,verbose = FALSE,
+                          prevAns = output1,
+                          returnDeps = TRUE)) 
+```
+# Results
+```{r, echo=FALSE}
+# Table for estimates from the adjusted model. 
+
+parameter <- output2$effects$effectName
+estimate <- output2$theta
+st.error <- sqrt(diag(output2$covtheta))
+normal.variate <- estimate/st.error
+p.value.2sided <- 2*pnorm(abs(normal.variate),lower.tail = FALSE)
+results.table2 <- data.frame(parameter,
+                      estimate = round(estimate,3),
+                      st.error = round(st.error,3),
+                      normal.variate = round(normal.variate,2),
+                      p.value = round(p.value.2sided,4))
+
+kable(results.table2)
+```
+
+Not shown in this table: Overall maximum convergence ratio for the model is ~.26 and convergence t-ratios are all less than 0.1.
+
+```{r, echo=FALSE, include=FALSE}
+# Computing fits from the adjusted modell. 
+
+fit.indeg2 <- sienaGOF(output2,IndegreeDistribution,varName = "friends.net",cumulative = FALSE)
+fit.outdeg2 <- sienaGOF(output2,OutdegreeDistribution,varName = "friends.net",cumulative = FALSE)
+fit.triads2 <- sienaGOF(output2,TriadCensus,varName = "friends.net") 
+fit.geodist2 <- sienaGOF(output2,geo.dist,varName = "friends.net",cumulative = FALSE)
+fit.behaviour2 <- sienaGOF(output2,BehaviorDistribution, verbose=TRUE,join=TRUE,varName="delinq.dep")
+```
+
+```{r,echo=FALSE}
+#Plotting adjusted fits, looks much better now. All fits well above 0.05. 
+
+plot(fit.indeg2)
+plot(fit.outdeg2)
+plot(fit.triads2,center = TRUE,scale = TRUE)
+plot(fit.geodist2)
+plot(fit.behaviour2)
+```
+
+
+Looking at my estimates in order, the outdegree effect is negative which tells us that there is a low probability to arbitrarily befriend others(Snijders, 2017 p.26). There is a strong tendency towards reciprocation in the network ($\beta-reciprocity$ = 2.062). The estimates for triadic closure is both positive and negative depending on configuration. However, the positive estimate is much larger ($\beta-GWESPFF$ = 1.913). The negative estimate has a large standard error and is also insignificant. Our estimate for 3-cycles is negative, have a large standard error and is insignificant. Taken together, I believe that this shows that the network has tendency towards hierarchical ordering which disconfirms __Alt Hyp2__. The network is permeated by reciprocation, some forms of triadic closure and hierarchical order. I believe a reason to the large standard errors and insignificant estimates could be the small data set.
+
+There is a negative effect from square rooted high in-degree on receiving and maintaining incoming friendship nominations. Square rooted high out-degree also have a negative effect but this estimate is insignificant. Its standard error is well over half of the estimate size. High out-degree activity have a minimally positive effect on new outgoing friendship formations and the sustainment of ties. Although, this estimate is insignificant. 
+
+An interpretation is that students with a lot of reciprocated friendships will consider their network position satisfying enough, which is indicated by the negative estimate for reciprocated degree-activity. So these students will become less active in forming new friendships but the high estimate for reciprocation indicate that they have a high probability to maintain friendships with those they are already mutually connected with. (ibid)
+
+Results show a homophily tendency among the students to befriending others in the network who have fathers that share the same, crude, religious attributes as their fathers. This confirms __Alt Hyp 1__. I believe the caveats that I spoke of in section 1 have to be kept in mind, however I still think that the results indicate that the (non)religious background of close family members have a relative importance in determining friendship network changes.
+
+\newpage
+
+The results suggests that individuals in the network selects friends based on how similar they are in terms of delinquency, $\beta-same.delinq.dep$ = 1.721. However, the estimate for average similarity, the last estimate in the table, suggests that there is also peer pressure processes happening were individuals influence the delinquent behavior of whom they are tied to. We thus have confirming evidence for __Alt Hyp3__ but we also know that processes of selection on this attribute is operating simultaneously. Tieing these results together with the ongoing scientific debate regarding influence vs homophily as well as the interpretative framework of Chambliss, future studies could control if delinquent behavior is influenced by socio-economic variables. 
+
+
+\newpage
+
+# Reference list
+
+BAKER-SPERRY, L. (2001). Passing on the faith: The father's role in religious transmission. Sociological Focus (Kent, Ohio), 34(2), 185-198. https://doi.org/10.1080/00380237.2001.10571190
+
+
+BLOCK, P., & GRUND, T. (2014). Multidimensional homophily in friendship Networks. Network Science (Cambridge University Press), 2(2), 189-212. https://doi.org/10.1017/nws.2014.17
+
+
+CHAMBLISS, W. J. (1973). Sociological readings in the conflict perspective. Addison-Wesley.
+
+
+CHRISTAKIS, N. A., & FOWLER, J. H. (2007). The Spread of Obesity in a Large Social Network over 32 Years. https://doi.org/10.1056/NEJMsa066082
+
+
+GALLAGHER, H. C., & ROBINS, G. (2015). Network statistical models for language learning contexts: Exponential random graph models and willingness to communicate. Language Learning, 65(4), 929-962. https://doi.org/10.1111/lang.12130
+
+
+KNECHT, A., 2008. Friendship Selection and Friends' Influence. Dynamics of Networks and Actor Attributes in Early Adolescence. PhD dissertation, University of Utrecht.
+
+
+LABUN, A., WITTEK, R., & STEGLICH, C. (2016). The co-evolution of power and friendship networks in an organization. Network Science (Cambridge University Press), 4(3), 364-384. https://doi.org/10.1017/nws.2016.7
+
+
+LESZCZENSKY, L., & PINK, S. (2015). Ethnic segregation of friendship networks in school: Testing a rational-choice argument of differences in ethnic homophily between classroom- and grade-level networks. Social Networks, 42, 18-26. https://doi.org/10.1016/j.socnet.2015.02.002
+
+
+RIPLEY, R. M., ET AL. (2021) "Manual for RSiena" Oxford: University of Oxford, Department of Statistics; Nuffield College. University of Groningen: Department of Sociology. 
+
+
+ROBINS, G. (2015). Doing social network research: network-based research design for social scientists. SAGE.
+
+
+SHALIZI, C. R., & THOMAS, A. C. (2010). Homophily and Contagion Are Generically Confounded in Observational Social Network Studies. https://doi.org/10.1177/0049124111404820
+
+
+SIMMEL, G., & WOLFF, K. H. (1950). The sociology of georg simmel.
+
+
+SNIJDERS, T.A.B., STEGLICH, C.E.G., and VAN DE BUNT, G.G. (2010). Introduction to actor-based models for network dynamics. Social Networks, 32, 44-60.
+http://dx.doi.org/10.1016/j.socnet.2009.02.004
+
+
+SNIJDERS, T. A. B., & PICKUP, M. (2017). Stochastic actor oriented models for network dynamics. In M. Lubell, A. H. Montgomery & J. N. Victor (Eds.), (). Oxford University Press. https://doi.org/10.1093/oxfordhb/9780190228217.013.10
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
