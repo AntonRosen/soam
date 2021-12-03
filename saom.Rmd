@@ -1,0 +1,494 @@
+---
+title: "Final Project-SNA"
+author: "Anton Rosén"
+date: '2021-04-03'
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning=FALSE)
+
+library(RSiena)
+library(network)
+library(sna)
+library(knitr)
+library(ggplot2)
+
+# Importing friendship and attribute data.
+
+klas12b.friendship.wave1 <- as.matrix(read.table("klas12b-net-1.dat"))
+klas12b.friendship.wave2 <- as.matrix(read.table("klas12b-net-2.dat"))
+klas12b.friendship.wave3 <- as.matrix(read.table("klas12b-net-3.dat"))
+klas12b.friendship.wave4 <- as.matrix(read.table("klas12b-net-4.dat"))
+
+klas12b.delinquency <- as.matrix(read.table("klas12b-delinquency.dat"))
+klas12b.demographics <- as.matrix(read.table("klas12b-demographics.dat"))
+
+colnames(klas12b.delinquency) <- c("Wave1","Wave2","Wave3","Wave4")
+colnames(klas12b.demographics) <- c("SexBinary","Age","EthnicityBinary","Relig.OfDad")
+```
+
+```{r, echo=FALSE}
+
+# Recoding incidentally missing nominator (9s) and structurally missing nominator or nominee (10s) to NAs in friendship adjacency matrices. 
+
+
+klas12b.friendship.wave1[klas12b.friendship.wave1==9] <- NA
+klas12b.friendship.wave2[klas12b.friendship.wave2==9] <- NA
+klas12b.friendship.wave3[klas12b.friendship.wave3==9] <- NA
+klas12b.friendship.wave4[klas12b.friendship.wave4==9] <- NA
+
+klas12b.friendship.wave1[klas12b.friendship.wave1==10] <- NA
+klas12b.friendship.wave2[klas12b.friendship.wave2==10] <- NA
+klas12b.friendship.wave3[klas12b.friendship.wave3==10] <- NA
+klas12b.friendship.wave4[klas12b.friendship.wave4==10] <- NA
+
+# Removing structurally missings.
+
+klas12b.friendship.wave1 <- klas12b.friendship.wave1[-2,][,-2]
+klas12b.friendship.wave2 <- klas12b.friendship.wave2[-2,][,-2]
+klas12b.friendship.wave3 <- klas12b.friendship.wave3[-2,][,-2]
+klas12b.friendship.wave4 <- klas12b.friendship.wave4[-2,][,-2]
+klas12b.friendship.wave1 <- klas12b.friendship.wave1[-15,][,-15]
+klas12b.friendship.wave2 <- klas12b.friendship.wave2[-15,][,-15]
+klas12b.friendship.wave3 <- klas12b.friendship.wave3[-15,][,-15]
+klas12b.friendship.wave4 <- klas12b.friendship.wave4[-15,][,-15]
+klas12b.friendship.wave1 <- klas12b.friendship.wave1[-17,][,-17]
+klas12b.friendship.wave2 <- klas12b.friendship.wave2[-17,][,-17]
+klas12b.friendship.wave3 <- klas12b.friendship.wave3[-17,][,-17]
+klas12b.friendship.wave4 <- klas12b.friendship.wave4[-17,][,-17]
+klas12b.friendship.wave1 <- klas12b.friendship.wave1[-18,][,-18]
+klas12b.friendship.wave2 <- klas12b.friendship.wave2[-18,][,-18]
+klas12b.friendship.wave3 <- klas12b.friendship.wave3[-18,][,-18]
+klas12b.friendship.wave4 <- klas12b.friendship.wave4[-18,][,-18] 
+```
+
+```{r, echo=FALSE}
+# Removing same missings from delinquency and demographics data.
+
+klas12b.demographics <- klas12b.demographics[-2,]
+klas12b.demographics <- klas12b.demographics[-15,]
+klas12b.demographics <- klas12b.demographics[-17,]
+klas12b.demographics <- klas12b.demographics[-18,]
+
+klas12b.delinquency <- klas12b.delinquency[-2,]
+klas12b.delinquency <- klas12b.delinquency[-15,]
+klas12b.delinquency <- klas12b.delinquency[-17,]
+klas12b.delinquency <- klas12b.delinquency[-18,]
+```
+
+```{r,echo=FALSE}
+# I convert religion of father into a binary. For the rest of this assignment, a student either have a religious father (Christian or other) or not. 2 = non-religious father, 1=religious father.
+klas12b.demographics[,4] <- ifelse(klas12b.demographics[,4]==2,2,1)
+```
+
+```{r, echo=FALSE}
+# Checking Hamming distance
+
+w12 <- table(klas12b.friendship.wave1, klas12b.friendship.wave2,useNA ="always")
+w23 <- table(klas12b.friendship.wave2, klas12b.friendship.wave3, useNA="always")
+w34 <- table(klas12b.friendship.wave3, klas12b.friendship.wave4, useNA="always")
+w14 <- table(klas12b.friendship.wave1, klas12b.friendship.wave4, useNA="always")
+
+Hamming <- function(changetable) {
+    return(changetable[2,1] + changetable[1,2])
+}
+
+hw12 <- Hamming(w12)
+hw23 <- Hamming(w23)
+hw34 <- Hamming(w34)
+hw14 <- Hamming(w14)
+
+
+# We have an overall change in Hamming distance of 89 which is good.
+```
+
+```{r, echo=FALSE}
+# Checking Jaccard coefficient. 
+Jaccard <- function(changetable) {
+    return(changetable[2,2]/(changetable[1,2] + changetable[2,1] + changetable[2,2]))
+}
+
+jw12 <- Jaccard(w12)
+jw23 <- Jaccard(w23)
+jw34 <- Jaccard(w34)
+jw14 <- Jaccard(w14)
+
+# We have an overall change in Jaccard coefficient with ~0.320 which is good. 
+```
+
+* Blue color - Students with non-religious fathers
+* Red color - Students with religious (Christian or other) fathers
+* Circle shape - non-Dutch students
+* Square shape - Dutch students
+* Large shape - Females
+* Small shape - Males
+
+```{r, echo=FALSE}
+# Setting up objects for visualization. Creating graph adjecencys for each wave and layouts.
+graph1 <- igraph::graph.adjacency(klas12b.friendship.wave1)
+graph2 <- igraph::graph.adjacency(klas12b.friendship.wave2)
+graph3 <- igraph::graph.adjacency(klas12b.friendship.wave3)
+graph4 <- igraph::graph.adjacency(klas12b.friendship.wave4)
+
+myLayout1 <- igraph::layout.kamada.kawai(graph1)
+myLayout2 <- igraph::layout.kamada.kawai(graph2)
+myLayout3 <- igraph::layout.kamada.kawai(graph3)
+myLayout4 <- igraph::layout.kamada.kawai(graph4)
+```
+
+
+```{r, echo=FALSE, fig.width=10, fig.height=10}
+# Visualizing network structure, blue coloring represent students with non-religious fathers. Red coloring indicate students with religious (Christian or other religion) fathers.
+# Circles represents ethnically non-Dutch students and squares represent ethnic Dutch students. 
+# Size of the vertices indicate gender, larger vertices = females.
+plot(graph1,
+     vertex.color = ifelse(klas12b.demographics[,4]==2, "blue", "red"),
+     vertex.shape = ifelse(klas12b.demographics[,3]==2, "circle", "square"),
+     vertex.size = ifelse(klas12b.demographics[,1]==1,15,10),
+     edge.color = "black",
+     edge.width = 1,
+     edge.arrow.size = 0.2,
+     layout = myLayout1,
+     main = "Friendship network and Religion of father - wave 1")
+
+ 
+```
+
+
+```{r,echo=FALSE, fig.width=10, fig.height=10}
+#  Plotting 2nd, 3rd and 4th waves
+plot(graph2,
+     vertex.color = ifelse(klas12b.demographics[,4]==2, "blue", "red"),
+     vertex.shape = ifelse(klas12b.demographics[,3]==2, "circle", "square"),
+     vertex.size = ifelse(klas12b.demographics[,1]==1,15,10),
+     edge.color = "black",
+     edge.width = 1,
+     edge.arrow.size = 0.2,
+     layout = myLayout1,
+     main = "Friendship network and Religion of father - wave 2")
+
+plot(graph3,
+     vertex.color = ifelse(klas12b.demographics[,4]==2, "blue", "red"),
+     vertex.shape = ifelse(klas12b.demographics[,3]==2, "circle", "square"),
+     vertex.size = ifelse(klas12b.demographics[,1]==1,15,10),
+     edge.color = "black",
+     edge.width = 1,
+     edge.arrow.size = 0.2,
+     layout = myLayout1,
+     main = "Friendship network and Religion of father - wave 3")
+
+plot(graph4,
+     vertex.color = ifelse(klas12b.demographics[,4]==2, "blue", "red"),
+     vertex.shape = ifelse(klas12b.demographics[,3]==2, "circle", "square"),
+     vertex.size = ifelse(klas12b.demographics[,1]==1,15,10),
+     edge.color = "black",
+     edge.width = 1,
+     edge.arrow.size = 0.2,
+     layout = myLayout1,
+     main = "Friendship network and Religion of father - wave 4")
+```
+
+```{r, echo=FALSE}
+# Gender ratio
+sex.ratio <- mean(klas12b.demographics[,1]==1)
+```
+
+```{r, echo=FALSE}
+# Mean non-religious fathers
+mean.religfat <- mean(klas12b.demographics[,4]==2)
+sd.religfat <- sd(klas12b.demographics[,4]==2)
+```
+
+```{r, echo=FALSE}
+# Mean delinquency per wave + standard deviations
+mean.delinq.w1 <- mean(klas12b.delinquency[,1])
+mean.delinq.w2 <- mean(klas12b.delinquency[,2])
+mean.delinq.w3 <- mean(klas12b.delinquency[,3])
+mean.delinq.w4 <- mean(klas12b.delinquency[,4])
+
+sd.delinq.w1 <- sd(klas12b.delinquency[,1])
+sd.delinq.w2 <- sd(klas12b.delinquency[,2])
+sd.delinq.w3 <- sd(klas12b.delinquency[,3])
+sd.delinq.w4 <- sd(klas12b.delinquency[,4])
+```
+
+```{r, echo=FALSE}
+# More descriptive statistics. I check density, reciprocity, transitivity and out- and in-degree (I  only keep one in table).
+dens.wave1 <- gden(klas12b.friendship.wave1)
+dens.wave2 <- gden(klas12b.friendship.wave2)
+dens.wave3 <- gden(klas12b.friendship.wave3)
+dens.wave4 <- gden(klas12b.friendship.wave4)
+
+reci.wave1 <- grecip(klas12b.friendship.wave1, measure="edgewise")
+reci.wave2 <- grecip(klas12b.friendship.wave2, measure="edgewise")
+reci.wave3 <- grecip(klas12b.friendship.wave3, measure="edgewise")
+reci.wave4 <- grecip(klas12b.friendship.wave4, measure="edgewise")
+
+trans.wave1 <- gtrans(klas12b.friendship.wave1, measure="weak")
+trans.wave2 <- gtrans(klas12b.friendship.wave2, measure="weak")
+trans.wave3 <- gtrans(klas12b.friendship.wave3, measure="weak")
+trans.wave4 <- gtrans(klas12b.friendship.wave4, measure="weak")
+
+outdeg.wave1 <- degree(klas12b.friendship.wave1, cmode="outdegree")
+mean.outdeg.w1 <- mean(outdeg.wave1)
+sd.outdeg.w1 <-sd(outdeg.wave1)
+outdeg.wave2 <- degree(klas12b.friendship.wave2, cmode="outdegree")
+mean.outdeg.w2 <- mean(outdeg.wave2)
+sd.outdeg.w2 <-sd(outdeg.wave2)
+outdeg.wave3 <- degree(klas12b.friendship.wave3, cmode="outdegree")
+mean.outdeg.w3 <- mean(outdeg.wave3)
+sd.outdeg.w3 <-sd(outdeg.wave3)
+outdeg.wave4 <- degree(klas12b.friendship.wave4, cmode="outdegree")
+mean.outdeg.w4 <- mean(outdeg.wave4)
+sd.outdeg.w4 <-sd(outdeg.wave4)
+
+indeg.wave1 <- degree(klas12b.friendship.wave1, cmode="indegree")
+mean.indeg.w1 <- mean(indeg.wave1)
+sd.indeg.w1 <-sd(indeg.wave1)
+indeg.wave2 <- degree(klas12b.friendship.wave2, cmode="indegree")
+mean.indeg.w2 <- mean(indeg.wave2)
+sd.indeg.w2 <-sd(indeg.wave2)
+indeg.wave3 <- degree(klas12b.friendship.wave3, cmode="indegree")
+mean.indeg.w3 <- mean(indeg.wave3)
+sd.indeg.w3 <-sd(indeg.wave3)
+indeg.wave4 <- degree(klas12b.friendship.wave4, cmode="indegree")
+mean.indeg.w4 <- mean(indeg.wave4)
+sd.indeg.w4 <-sd(indeg.wave4)
+```
+
+```{r, echo=FALSE} 
+# Binding together estimates. 
+
+d <- rbind(c(dens.wave1,dens.wave2,dens.wave3,dens.wave4))
+
+r <- rbind(c(reci.wave1,reci.wave2,reci.wave3,reci.wave4))
+
+t <- rbind(c(trans.wave1,trans.wave2,trans.wave3,trans.wave4))
+
+m.deg <- rbind(c(mean.outdeg.w1,mean.outdeg.w2,mean.outdeg.w3,mean.outdeg.w4))
+
+sd.out <- rbind(c(sd.outdeg.w1,sd.outdeg.w2,sd.outdeg.w3,sd.outdeg.w4))
+
+sd.in <- rbind(c(sd.indeg.w1,sd.indeg.w2,sd.indeg.w3,sd.indeg.w4))
+
+m.delinq <- rbind(c(mean.delinq.w1,mean.delinq.w2,mean.delinq.w3,mean.delinq.w4))
+
+sd.delinq <- rbind(c(sd.delinq.w1,sd.delinq.w2,sd.delinq.w3,sd.delinq.w4))
+
+```
+
+
+```{r, echo=FALSE}
+# Creating table of descriptive statistics.
+
+table1 <- rbind(d,r,t,m.deg,sd.out,sd.in, sex.ratio, mean.religfat, m.delinq, sd.delinq)
+row.names(table1) <- c("Density", "Reciprocity", "Transitivity", "Mean degree", "SD out-degree", "SD in-degree", "Proportion females", "Mean non-religious fathers", "Mean delinquency", "SD delinquency") 
+colnames(table1) <- c("Wave 1", "Wave 2", "Wave 3", "Wave 4")
+
+kable((table1), digits=3, caption = "Descriptive statistics")
+```
+
+```{r, echo=FALSE}
+# Creating table of previously calculated Hamming distance and Jaccard coefficient. 
+
+ham <- rbind(c(hw12,hw23,hw34,hw14))
+jac <- rbind(c(jw12,jw23,jw34,jw14))
+
+table2 <- rbind(ham,jac)
+row.names(table2) <- c("Hamming Distance", "Jaccard Index")
+colnames(table2) <- c("Wave 1-2", "Wave 2-3", "Wave 3-4", "Wave 1-4")
+
+kable((table2), digits=3, caption = "Descriptive statistics - Indicators of change")
+```
+
+
+```{r, echo=FALSE}
+# Visualizing delinquency distribution. 
+
+klas12b.delinquency.visual <- as.data.frame(klas12b.delinquency)
+
+klas12b.delinquency.visual <- stack(klas12b.delinquency.visual)
+
+ggplot(klas12b.delinquency.visual, aes(x=ind, y=values, fill=ind))+
+  geom_violin()+
+  labs(title="Delinquency distribution", x="Period", y="Values") 
+```
+
+
+```{r, echo=FALSE}
+# Identifying number of actors.
+actors <- dim(klas12b.demographics)[1]
+```
+
+```{r, echo=FALSE}
+# Dependent variable for hypothesis 1 and 2.
+friends.net <- sienaDependent(array(c(klas12b.friendship.wave1, klas12b.friendship.wave2, klas12b.friendship.wave3, klas12b.friendship.wave4),dim=c(actors, actors, 4)))
+```
+
+```{r, echo=FALSE}
+#  Dependent actor attribute for hypothesis 3.
+delinq.dep <- sienaNet(klas12b.delinquency, type="behavior")
+```
+
+```{r, echo=FALSE}
+# Creating covariates for analysis. 
+
+sex.covar <- coCovar(klas12b.demographics[,1])
+age.covar <- coCovar(klas12b.demographics[,2])
+ethnic.covar <- coCovar(klas12b.demographics[,3])
+relig.covar <- coCovar(klas12b.demographics[,4])
+```
+
+```{r, echo=FALSE}
+# Creating data to work with.
+network.data <- sienaDataCreate(friends.net,delinq.dep,sex.covar,age.covar,ethnic.covar,relig.covar)
+```
+
+```{r, echo=FALSE, include=FALSE}
+# Specifying effects. 
+
+effects <- getEffects(network.data)
+effects <- includeEffects(effects,sameX,interaction1="relig.covar", name="friends.net") # Religious father homophily effect, Alt H1
+effects <- includeEffects(effects,recip,gwespFF,cycle3) # Reciprocation, transitivity and hierarchical clustering (Gwesp+Cycle3), Alt H2
+effects <- includeEffects(effects,sameX,interaction1="delinq.dep", name="friends.net") # Delinquency homophily, its included as control since social influence and homophily is entangled processes. 
+effects <- includeEffects(effects,name="delinq.dep",avSim,interaction1="friends.net") # Peer pressure effect with delinquency as DV and network as IV, Alt H3
+```
+
+
+
+```{r, echo=FALSE, include=FALSE}
+# The model converges, maximum convergence ratio do not exceed 0.2.
+
+friends.alg1  <- sienaAlgorithmCreate(projname = "school_friends", n3 = 1000, seed = 1234)
+(output1 <- siena07(friends.alg1, data=network.data, effects=effects, batch = F, verbose = F, returnDeps=T ))
+```
+
+```{r, echo=FALSE, include=FALSE}
+parameter <- output1$effects$effectName
+estimate <- output1$theta
+st.error <- sqrt(diag(output1$covtheta))
+normal.variate <- estimate/st.error
+p.value.2sided <- 2*pnorm(abs(normal.variate),lower.tail = FALSE)
+results.table <- data.frame(parameter,
+                      estimate = round(estimate,3),
+                      st.error = round(st.error,3),
+                      normal.variate = round(normal.variate,2),
+                      p.value = round(p.value.2sided,4))
+
+kable(results.table) 
+
+#Creating a table for the SOAM results from the first output. However, as we will see, the fits are not ideal so this table is not included in the final report.
+```
+
+```{r,echo=FALSE, include=FALSE, warning=FALSE}
+# Goodness of fits for in-degree distribution, out-degree distribution, triad census and behavior distribution.
+
+fit.indeg <- sienaGOF(output1,IndegreeDistribution,varName = "friends.net",cumulative = FALSE)
+fit.outdeg <- sienaGOF(output1,OutdegreeDistribution,varName = "friends.net",cumulative = FALSE)
+fit.triads <- sienaGOF(output1,TriadCensus,varName = "friends.net")
+fit.behaviour <- sienaGOF(output1,BehaviorDistribution, verbose=TRUE,join=TRUE,varName="delinq.dep")
+```
+
+```{r,echo=FALSE}
+# Plotting the fits. Although the fits for triads are above 0.05 (threshold) I think these can be improved. Also in-degree has to be fixed, it´s lower than 0.05.
+
+plot(fit.indeg)
+plot(fit.outdeg)
+plot(fit.triads,center = TRUE,scale = TRUE)
+plot(fit.behaviour)
+```
+
+```{r, echo=FALSE}
+# Making use of Robert Krauses auxiliary fit function from lab on 17.03.21 to calculate geodesic distances fit. 
+
+geo.dist <- function(i, data, sims, period, groupName,
+    varName, levls = c(1:5,Inf), cumulative= TRUE, ...) {
+    x <- networkExtraction(i, data, sims, period, groupName, varName)
+    require(sna)
+    a <- sna::geodist(symmetrize(x))$gdist
+    if (cumulative)
+    {
+        gdi <- sapply(levls, function(i){ sum(a <= i) })
+    }
+    else
+    {
+        gdi <- sapply(levls, function(i){ sum(a == i) })
+    }
+    names(gdi) <- as.character(levls)
+    return(gdi)
+}
+```
+
+```{r, echo=FALSE, include=FALSE}
+# Conducting goodness of fit test for geodesic distribution.
+fits.geodist <- sienaGOF(output1,geo.dist,
+                           varName = "friends.net",cumulative = FALSE)
+```
+
+```{r, echo=FALSE}
+# Ploting geodesic distribution fit. Looks good.
+plot(fits.geodist) 
+```
+
+
+```{r, echo=FALSE, include=FALSE}
+# Adjusting model. I add gwespBB to improve fits for triads. I include squared in- and out degree effects, out-degree activity and reciprocal degree-related activity. This will help imporve fits for in- and out-degree.
+
+effects2 <- includeEffects(effects,name = "friends.net",gwespBB)
+effects2 <- includeEffects(effects2,name = "friends.net",inPopSqrt,outPopSqrt,outAct,reciAct)
+```
+
+```{r, echo=FALSE,include=FALSE}
+# Maximum convergence ratio is sufficient (~.25). All convergence t-ratios looks good.
+
+(output2 <- siena07(friends.alg1,
+                          data = network.data,
+                          effects = effects2,
+                          batch = FALSE,verbose = FALSE,
+                          prevAns = output1,
+                          returnDeps = TRUE)) 
+```
+# Results
+```{r, echo=FALSE}
+# Table for estimates from the adjusted model. 
+
+parameter <- output2$effects$effectName
+estimate <- output2$theta
+st.error <- sqrt(diag(output2$covtheta))
+normal.variate <- estimate/st.error
+p.value.2sided <- 2*pnorm(abs(normal.variate),lower.tail = FALSE)
+results.table2 <- data.frame(parameter,
+                      estimate = round(estimate,3),
+                      st.error = round(st.error,3),
+                      normal.variate = round(normal.variate,2),
+                      p.value = round(p.value.2sided,4))
+
+kable(results.table2)
+```
+
+
+```{r, echo=FALSE, include=FALSE}
+# Computing fits from the adjusted modell. 
+
+fit.indeg2 <- sienaGOF(output2,IndegreeDistribution,varName = "friends.net",cumulative = FALSE)
+fit.outdeg2 <- sienaGOF(output2,OutdegreeDistribution,varName = "friends.net",cumulative = FALSE)
+fit.triads2 <- sienaGOF(output2,TriadCensus,varName = "friends.net") 
+fit.geodist2 <- sienaGOF(output2,geo.dist,varName = "friends.net",cumulative = FALSE)
+fit.behaviour2 <- sienaGOF(output2,BehaviorDistribution, verbose=TRUE,join=TRUE,varName="delinq.dep")
+```
+
+```{r,echo=FALSE}
+#Plotting adjusted fits, looks much better now. All fits well above 0.05. 
+
+plot(fit.indeg2)
+plot(fit.outdeg2)
+plot(fit.triads2,center = TRUE,scale = TRUE)
+plot(fit.geodist2)
+plot(fit.behaviour2)
+```
+
+
+
+
+
